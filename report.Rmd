@@ -1,3 +1,21 @@
+---
+title: "Report on Movielens"
+author: "tradityaxx"
+date: "9/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Download data, wrangle and analysis
+
+File download-data.R is used to download raw data from <http://files.grouplens.org/datasets/movielens/ml-10m.zip>, and then saved under ~/movielens/data/ folder. Subsequently wrangle-data.R is used to create the movielens data which is used for further analysis written in analysis.R as follow:
+
+### 1. 1. Split movielens data into train and validation set
+
+```{r warning=FALSE, message=FALSE}
 library(tidyverse)
 library(caret)
 library(lubridate)
@@ -20,9 +38,13 @@ edx <- rbind(edx, removed)
 
 rm(test_index, temp, movielens, removed)
 
-#-------------------------------------------------------------------------------
-# CREATE SMALLER DATASET FOR TESTING
-#-------------------------------------------------------------------------------
+```
+
+### 1. 2. Create smaller dataset for testing purpose
+
+The edx dataset contains ~ 9 millions observations which can take some time to do computation. Thus smaller dataset is created with 10% of the edx dataset
+
+```{r warning=FALSE, message=FALSE}
 set.seed(1, sample.kind = "Rounding")
 dat_index <- sample(edx$userId, 10^5, replace = FALSE)
 dat <- edx[dat_index,]
@@ -36,20 +58,31 @@ train_set <- dat[-test_index,]
 test_set <- test_set %>% 
   semi_join(train_set, by = "movieId") %>%
   semi_join(train_set, by = "userId")
+```
 
-#-------------------------------------------------------------------------------
-# TESTING MODELS
-#-------------------------------------------------------------------------------
+## 2. Testing the models
+
+RMSE is used to evaluate the models as follow:
+
+```{r warning=FALSE, message=FALSE}
 rmse <- function(pred_rating, actual_rating){
   sqrt(mean((pred_rating - actual_rating)^2))
 }
+```
 
-# 1. SIMPLE MODEL
+Model 2. 1, 2. 2 and 2. 3 are replicated from the lecture for the sake of completeness.
+
+### 2. 1. Simple model 
+
+```{r warning=FALSE, message=FALSE}
 mu <- mean(train_set$rating)
 
 model_1_rmse <- rmse(mu, test_set$rating)
+```
 
-# 2. ADD MOVIE EFFECTS 
+### 2. 2. Add movie effect
+
+```{r warning=FALSE, message=FALSE}
 movie_avg <- train_set %>% 
   group_by(movieId) %>%
   summarise(b_i = mean(rating - mu)) 
@@ -60,9 +93,12 @@ b_i <- test_set %>%
 
 y_hat <- mu + b_i
 
-model_2_rmse <- rmse(y_hat, test_set$rating)  
+model_2_rmse <- rmse(y_hat, test_set$rating)
+```
 
-# 3. ADD USER EFFECTS
+### 2. 3. Add user effect
+
+```{r warning=FALSE, message=FALSE}
 user_avg <- train_set %>%
   group_by(userId) %>% 
   left_join(movie_avg, by = "movieId") %>%
@@ -75,12 +111,19 @@ b_u <- test_set %>%
 y_hat <- mu + b_i + b_u
 
 model_3_rmse <- rmse(y_hat, test_set$rating)
+```
 
-# 4. ADD WEEK EFFECT
+### 2. 4. Add week effect
+
+Add new column week in the train set
+```{r warning=FALSE, message=FALSE}
 train_set_week <- train_set %>%
   mutate(date = as_datetime(timestamp), 
          week = round_date(date, unit = "week"))
-  
+```
+
+Plot week vs rating and fit the Loess regression to see the relationship
+```{r message=FALSE, warning=FALSE}
 # Fit with a Loess regression
 week <- train_set_week %>% .$week 
 total_week <- as.numeric(diff(range(week))) / 7
@@ -94,7 +137,11 @@ train_set_week %>% mutate(smooth = fit$fitted) %>%
   ggplot(aes(week, rating)) + 
   geom_point() +
   geom_line(aes(week, smooth), col = "red", lwd=1)
+```
 
+We can see that there is a some relationship between the week the user's u rated movie i. Week effect f_w can be defined as follow
+
+```{r warning=FALSE, message=FALSE}
 # Define the week effect f_w
 week_avg <- train_set_week %>% 
   group_by(week) %>%
@@ -113,24 +160,13 @@ y_hat <- mu + b_i + b_u + f_w
 y_hat <- replace_na(y_hat, 0)
 
 model_4_rmse <- rmse(y_hat, test_set$rating)
+```
 
-## why there's one NA on the joined test_set with week_avg??
-test_set %>% 
-  mutate(date = as_datetime(timestamp), week = round_date(date, unit = "week")) %>%
-  left_join(week_avg, by = "week") %>% filter(is.na(f_w))
+## 2. 5 Add genre effect
 
-# train_set doesn't have record on week 1996-10-20, while the test_set does
-train_set_week %>% mutate(month = month(week), year = year(week), day = day(week)) %>%
-  filter(year==1996 & month==10 & movieId==47)
+Group the train set by genre and plot the average rating with standard error for each genre. Filter the data to contain only genres with more than 1000 ratings
 
-test_set %>% 
-  mutate(date = as_datetime(timestamp), week = round_date(date, unit = "week"), 
-         year = year(week), month = month(week), day = day(week)) %>%
-  left_join(week_avg, by = "week") %>%
-  filter(year==1996 & month==10 & movieId==47)
-
-# ADD GENRE EFFECT
-# Plot to see the genre effect
+```{r warning=FALSE, message=FALSE}
 train_set %>% group_by(genres) %>%
   summarise(n = n(), avg = mean(rating), se = sd(rating)/sqrt(n)) %>%
   filter(n > 1000) %>% 
@@ -138,7 +174,10 @@ train_set %>% group_by(genres) %>%
   geom_point() +
   geom_errorbar() +
   theme(axis.text.x = element_text(angle=60, hjust=1))
+```
+We can see that some genres are more popular than others, so the genre effect g_k is defined as follow
 
+```{r warning=FALSE, message=FALSE}
 # Define the genre effect
 genre_avg <- train_set %>% 
   group_by(genres) %>%
@@ -153,14 +192,17 @@ g_k <- test_set %>%
 y_hat <- mu + b_i + b_u + g_k
 
 model_5_rmse <- rmse(y_hat, test_set$rating)
+```
 
-#-------------------------------------------------------------------------------
-# COMPARE THE RESULTS
-#-------------------------------------------------------------------------------
+## 3. Compare the results
+
+```{r echo=FALSE}
 rmse_results <- data.frame(Method = c("Simple Model", "Movie Effect", 
-                                      "Movie + User Effect", "Movie + User + Week Effect",
+                                      "Movie + User Effect", 
+                                      "Movie + User + Week Effect",
                                       "Movie + User + Genre Effect"), 
                            RMSE = c(model_1_rmse, model_2_rmse, model_3_rmse,
                                     model_4_rmse, model_5_rmse))
 
 rmse_results %>% knitr::kable()
+```
