@@ -5,7 +5,8 @@ load(file="rda/movielens.rda")
 
 # Validation set will be 10% of MovieLens data
 set.seed(1, sample.kind = "Rounding") 
-test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+test_index <- createDataPartition(y = movielens$rating, 
+                                  times = 1, p = 0.1, list = FALSE)
 edx <- movielens[-test_index,]
 temp <- movielens[test_index,]
 
@@ -28,7 +29,8 @@ dat_index <- sample(edx$userId, 10^5, replace = FALSE)
 dat <- edx[dat_index,]
 
 # Split the data into test and train set
-test_index <- createDataPartition(y = dat$rating, times = 1, p = 0.1, list = FALSE)
+test_index <- createDataPartition(y = dat$rating, 
+                                  times = 1, p = 0.1, list = FALSE)
 test_set <- dat[test_index,]
 train_set <- dat[-test_index,]
 
@@ -44,12 +46,12 @@ rmse <- function(pred_rating, actual_rating){
   sqrt(mean((pred_rating - actual_rating)^2))
 }
 
-# 1. SIMPLE MODEL
+# SIMPLE MODEL
 mu <- mean(train_set$rating)
 
 model_1_rmse <- rmse(mu, test_set$rating)
 
-# 2. ADD MOVIE EFFECTS 
+# ADD MOVIE EFFECTS 
 movie_avg <- train_set %>% 
   group_by(movieId) %>%
   summarise(b_i = mean(rating - mu)) 
@@ -62,7 +64,7 @@ y_hat <- mu + b_i
 
 model_2_rmse <- rmse(y_hat, test_set$rating)  
 
-# 3. ADD USER EFFECTS
+# ADD USER EFFECTS
 user_avg <- train_set %>%
   group_by(userId) %>% 
   left_join(movie_avg, by = "movieId") %>%
@@ -76,58 +78,74 @@ y_hat <- mu + b_i + b_u
 
 model_3_rmse <- rmse(y_hat, test_set$rating)
 
-# 4. ADD WEEK EFFECT
-train_set_week <- train_set %>%
-  mutate(date = as_datetime(timestamp), 
-         week = round_date(date, unit = "week"))
-  
-# Fit with a Loess regression
-week <- train_set_week %>% .$week 
-total_week <- as.numeric(diff(range(week))) / 7
-span <- 150 / total_week
+# ADD DAY EFFECT
+train_set <- train_set %>% 
+  mutate(date = as_datetime(timestamp))
 
-fit <- loess(rating ~ as.numeric(week), degree = 2, 
-             span = span, data = train_set_week)
+# See the effect of day on rating
+train_set %>% 
+  ggplot(aes(date,rating)) +
+  geom_point() + geom_smooth()
 
-# Plot to see the week effect
-train_set_week %>% mutate(smooth = fit$fitted) %>%
-  ggplot(aes(week, rating)) + 
+# Apply bin smoothing, with normal kernel
+span <- 1000
+
+train_set_daycount <- train_set %>% 
+  mutate(day = as_date(date), 
+         daycount = as.numeric(max(day) - day)) %>%
+  arrange(daycount)
+
+fit <- with(train_set_daycount, 
+            ksmooth(daycount, rating, kernel="normal", bandwidth=span))
+
+train_set_daycount %>% mutate(smooth = fit$y) %>%
+  ggplot(aes(daycount, rating)) + 
   geom_point() +
-  geom_line(aes(week, smooth), col = "red", lwd=1)
+  geom_line(aes(daycount, smooth), color="red")
 
-# Define the week effect f_w
-week_avg <- train_set_week %>% 
-  group_by(week) %>%
+# Add day effect d_ui into the model
+day_avg <- train_set_daycount %>% 
+  group_by(daycount) %>% 
   left_join(movie_avg, by = "movieId") %>%
   left_join(user_avg, by = "userId") %>%
-  summarise(f_w = mean(rating - mu - b_i - b_u))
+  summarise(d_ui = mean(rating - mu - b_i - b_u))
 
-f_w <- test_set %>% 
-  mutate(date = as_datetime(timestamp), week = round_date(date, unit = "week")) %>%
-  left_join(week_avg, by = "week") %>%
-  .$f_w
+test_set_daycount <- test_set %>% 
+  mutate(date = as_datetime(timestamp), 
+         day = as_date(date), 
+         daycount = as.numeric(max(day) - day)) %>%
+  arrange(daycount)
 
-y_hat <- mu + b_i + b_u + f_w
+test_set_daycount %>% 
+  left_join(movie_avg, by="movieId") %>%
+  left_join(user_avg, by="userId") %>%
+  left_join(day_avg, by="daycount")
+# Notice there are a lot of NAs for the day effect
 
-# Replace 1 NA value with 0
-y_hat <- replace_na(y_hat, 0)
+# ADD WEEK EFFECT 
+train_set_week %>% 
+  mutate(week = round_date(date, unit="week"))
 
-model_4_rmse <- rmse(y_hat, test_set$rating)
+week_avg <- train_set_week %>% 
+  group_by(week) %>% 
+  left_join(movie_avg, by = "movieId") %>%
+  left_join(user_avg, by = "userId") %>%
+  summarise(w_ui = mean(rating - mu - b_i - b_u))
 
-## why there's one NA on the joined test_set with week_avg??
-test_set %>% 
-  mutate(date = as_datetime(timestamp), week = round_date(date, unit = "week")) %>%
-  left_join(week_avg, by = "week") %>% filter(is.na(f_w))
+w_ui <- test_set %>% 
+  mutate(date = as_datetime(timestamp), 
+         week = round_date(date, unit="week")) %>%
+  left_join(movie_avg, by="movieId") %>%
+  left_join(user_avg, by="userId") %>%
+  left_join(week_avg, by="week") %>%
+  .$w_ui
+# Now there's only 1 NA when using week effect. Replace NA with mu
+w_ui <- replace_na(w_ui, mu)
 
-# train_set doesn't have record on week 1996-10-20, while the test_set does
-train_set_week %>% mutate(month = month(week), year = year(week), day = day(week)) %>%
-  filter(year==1996 & month==10 & movieId==47)
+y_hat <- mu + b_i + b_u + w_ui
+model_4_rmse <- rmse(test_set$rating, y_hat)
+# Week effect did improve from previous model, but not significant
 
-test_set %>% 
-  mutate(date = as_datetime(timestamp), week = round_date(date, unit = "week"), 
-         year = year(week), month = month(week), day = day(week)) %>%
-  left_join(week_avg, by = "week") %>%
-  filter(year==1996 & month==10 & movieId==47)
 
 # ADD GENRE EFFECT
 # Plot to see the genre effect
@@ -139,20 +157,6 @@ train_set %>% group_by(genres) %>%
   geom_errorbar() +
   theme(axis.text.x = element_text(angle=60, hjust=1))
 
-# Define the genre effect
-genre_avg <- train_set %>% 
-  group_by(genres) %>%
-  left_join(user_avg, by = "userId") %>% 
-  left_join(movie_avg, by = "movieId") %>%
-  summarise(g_k = mean(rating - mu - b_i - b_u))
-
-g_k <- test_set %>%
-  left_join(genre_avg, by = "genres") %>%
-  .$g_k
-
-y_hat <- mu + b_i + b_u + g_k
-
-model_5_rmse <- rmse(y_hat, test_set$rating)
 
 #-------------------------------------------------------------------------------
 # COMPARE THE RESULTS
@@ -164,3 +168,7 @@ rmse_results <- data.frame(Method = c("Simple Model", "Movie Effect",
                                     model_4_rmse, model_5_rmse))
 
 rmse_results %>% knitr::kable()
+
+
+## Genre Effect
+
