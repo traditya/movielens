@@ -3,6 +3,6 @@ Capstone project from edX data science course. A recommender system from Netflix
 
 download-data.R --> download movielens data from http://files.grouplens.org/datasets/movielens/ml-10m.zip
 
-wrangle-data.R --> wrangle raw data to create movielens dataframe
+wrangle-data.R --> wrangle raw data to create movielens dataframe.
 
-analysis.R --> contains the data partition into train, test and validation set. Comparing different models to see which one has the minimum loss (RMSE)
+analysis.R --> contains the data partition into train, test and validation set. Comparing different models to see which one has the minimum loss defined with RMSE.
