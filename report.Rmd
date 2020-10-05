@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 File download-data.R is used to download raw data from <http://files.grouplens.org/datasets/movielens/ml-10m.zip>, and then saved under ~/movielens/data/ folder. Subsequently wrangle-data.R is used to create the movielens data which is used for further analysis written in analysis.R as follow:
 
-### 1. 1. Split movielens data into train and validation set
+### 1.1. Split movielens data into train and validation set
 
 ```{r warning=FALSE, message=FALSE}
 library(tidyverse)
@@ -40,7 +40,7 @@ rm(test_index, temp, movielens, removed)
 
 ```
 
-### 1. 2. Create smaller dataset for testing purpose
+### 1.2. Create smaller dataset for testing purpose
 
 The edx dataset contains ~ 9 millions observations which can take some time to do computation. Thus smaller dataset is created with 10% of the edx dataset
 
@@ -70,7 +70,7 @@ rmse <- function(pred_rating, actual_rating){
 }
 ```
 
-### 2. 1. Simple model 
+### 2.1. Simple model 
 
 Simple model uses average rating ($\mu$) of all movies as a single predictor. This average
 rating can be seen as a baseline when we develop our models by adding other effects later.
@@ -79,13 +79,15 @@ The term $\epsilon_{u,i}$ refers to the unexplained errors not captured by $\mu$
 $$Y_{u,i}= \mu + \epsilon_{u,i}$$
 
 ```{r warning=FALSE, message=FALSE}
-# 1. SIMPLE MODEL
+#------------------------------
+# 2.1. SIMPLE MODEL
+#------------------------------
 mu <- mean(train_set$rating)
 
 model_1_rmse <- rmse(mu, test_set$rating)
 ```
 
-### 2. 2. Add movie effect
+### 2.2. Add movie effect
 
 It makes sense that some movies are just rated higher than other movies, thus we can
 add movie effect ($b_{i}$) as follow:
@@ -93,7 +95,9 @@ add movie effect ($b_{i}$) as follow:
 $$Y_{u,i}= \mu + b_{i} + \epsilon_{u,i}$$
 
 ```{r warning=FALSE, message=FALSE}
-# 2. ADD MOVIE EFFECTS 
+#------------------------------
+# 2.2. ADD MOVIE EFFECTS 
+#------------------------------
 movie_avg <- train_set %>% 
   group_by(movieId) %>%
   summarise(b_i = mean(rating - mu)) 
@@ -104,10 +108,10 @@ b_i <- test_set %>%
 
 y_hat <- mu + b_i
 
-model_2_rmse <- rmse(y_hat, test_set$rating)  
+model_2_rmse <- rmse(y_hat, test_set$rating) 
 ```
 
-### 2. 3. Add user effect
+### 2.3. Add user effect
 
 Furthermore, we know that some users are harsher than others thus tend to give lower
 ratings for the same set of movies. We can add user effer ($b_{u}$) as follow:
@@ -115,7 +119,9 @@ ratings for the same set of movies. We can add user effer ($b_{u}$) as follow:
 $$Y_{u,i}= \mu + b_{i} + b_{u} + \epsilon_{u,i}$$
 
 ```{r warning=FALSE, message=FALSE}
-# 3. ADD USER EFFECTS
+#------------------------------
+# 2.3. ADD USER EFFECTS
+#------------------------------
 user_avg <- train_set %>%
   group_by(userId) %>% 
   left_join(movie_avg, by = "movieId") %>%
@@ -130,10 +136,10 @@ y_hat <- mu + b_i + b_u
 model_3_rmse <- rmse(y_hat, test_set$rating)
 ```
 
-### 2. 4. Add week effect
+### 2.4. Add week effect
 
 We can observe that time has some effects on the ratings of the movie as well, in this case we can see how ratings has some relationship with the week the movies are rated.
-So we can further add week effect ($w_{u,i}$)to the previous model:
+So we can further add week effect ($w_{u,i}$) to the previous model:
 
 $$Y_{u,i}= \mu + b_{i} + b_{u} + w_{u,i} + \epsilon_{u,i}$$
 
@@ -164,10 +170,9 @@ train_set_week %>% mutate(smooth = fit$fitted) %>%
 We can see that there is a some relationship between the week the user's u rated movie i. Week effect $w_{u,i}$ can be defined as follow
 
 ```{r warning=FALSE, message=FALSE}
-# 4. ADD WEEK EFFECT 
-train_set_week %>% 
-  mutate(week = round_date(date, unit="week"))
-
+#------------------------------
+# 2.4. ADD WEEK EFFECT 
+#------------------------------
 week_avg <- train_set_week %>% 
   group_by(week) %>% 
   left_join(movie_avg, by = "movieId") %>%
@@ -187,9 +192,10 @@ w_ui <- replace_na(w_ui, mu)
 y_hat <- mu + b_i + b_u + w_ui
 
 model_4_rmse <- rmse(test_set$rating, y_hat)
+# Week effect did improve from previous model, but not significant
 ```
 
-## 2. 5. Add genre effect
+## 2.5. Add genre effect
 
 Group the train set by genre and plot the average rating with standard error for each genre. Filter the data to contain only genres with more than 1000 ratings
 
@@ -211,7 +217,9 @@ the loss function is defined as follow:
 $$\sum_{u,i}(y_{u,i} - \mu - b_i - b_u - w_{u,i})^2 + \lambda (\sum_i b_i^2 + \sum_i b_u^2 + \sum_{u,i} w_{u,i}^2)$$
 
 ```{r warning=FALSE, message=FALSE}
-# 7. ADD REGULARIZATION FOR MOVIE + USER + WEEK
+#------------------------------
+# 2.6. ADD REGULARIZATION FOR MOVIE + USER + WEEK
+#------------------------------
 lambda = 0.75
 
 week_avg_reg <- train_set_week %>% 
@@ -232,7 +240,7 @@ w_ui_reg <- replace_na(w_ui_reg, mu)
 
 y_hat <- mu + b_i + b_u + w_ui_reg
 
-model_7_rmse <- rmse(test_set$rating, y_hat)  
+model_6_rmse <- rmse(test_set$rating, y_hat)
 ```
 
 In order to choose the best value for $\lambda$, we can try several lambdas and choose the one with the smallest RMSE.
@@ -284,12 +292,12 @@ data.frame(lambdas, rmses) %>%
 
 ```{r echo=FALSE}
 rmse_results <- data.frame(Method = c("Simple Model", 
-                                      "Movie Model", 
-                                      "Movie + User Model", 
-                                      "Movie + User + Week Model",
-                                      "Regularized Movie + User + Week Model"), 
+                                      "Movie Effect", 
+                                      "Movie + User Effect", 
+                                      "Movie + User + Week Effect",
+                                      "Regularized Movie + User + Week Effect"), 
                            RMSE = c(model_1_rmse, model_2_rmse, model_3_rmse,
-                                    model_4_rmse, model_7_rmse))
+                                    model_4_rmse, model_6_rmse))
 
 rmse_results %>% knitr::kable()
 ```
